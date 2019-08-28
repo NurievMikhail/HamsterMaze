@@ -1,6 +1,7 @@
 import heapq
 import sys
 from os.path import splitext
+import argparse
 
 
 class PriorityQueue:
@@ -40,62 +41,77 @@ class Grid:
         return results
 
 
-def parse_maze(maze_name, is_logged = True):
+def read_maze(maze_name):
+    try:
+        with open(maze_name, 'r') as maze_file:
+            source_maze_data = maze_file.readlines()
+            maze_data = [line.strip(' "\n') for line in source_maze_data]
+            if not maze_data:
+                raise IOError
+
+            return source_maze_data, maze_data
+    except IOError:
+        raise Exception('Не удалось прочитать файл лабиринта! Введите путь до файла или создайте лабиринт в файле "maze.txt".')
+
+
+def parse_maze(maze_data):
     start = ()
     finish = ()
     start_found = False
     finish_found = False
     walls = []
 
-    try:
-        with open(maze_name, 'r') as maze_file:
-            maze_data = [line.strip(' "\n') for line in maze_file.readlines()]
-            if not maze_data:
-                raise IOError
-    except IOError:
-        if is_logged:
-            print('Не удалось прочитать файл лабиринта! Введите путь до файла или создайте лабиринт в файле "maze.txt".')
-        sys.exit(1)
-
     max_line_length = max([len(line) for line in maze_data])
 
     for i in range(len(maze_data)):
-        if maze_data[i].find('S') != -1:
+        start_position = maze_data[i].find('S')
+        if start_position != -1:
             if start_found:
-                if is_logged:
-                    print('У лабиринта не может быть больше одного старта! Оставьте один символ "S" в файле с лабиринтом.')
-                sys.exit(1)
+                raise Exception('У лабиринта не может быть больше одного старта! Оставьте один символ "S" в файле с лабиринтом.')
             else:
-                start = (i, maze_data[i].find('S'))
+                start = (i, start_position)
                 start_found = True
-        if maze_data[i].find('F') != -1:
+        finish_position = maze_data[i].find('F')
+        if finish_position != -1:
             if finish_found:
-                if is_logged:
-                    print('У лабиринта не может быть больше одного финиша! Оставьте один символ "F" в файле с лабиринтом.')
-                sys.exit(1)
+                raise Exception('У лабиринта не может быть больше одного финиша! Оставьте один символ "F" в файле с лабиринтом.')
             else:
-                finish = (i, maze_data[i].find('F'))
+                finish = (i, finish_position)
                 finish_found = True
         for j in range(len(maze_data[i])):
             if maze_data[i][j] == 'x':
                 walls.append((i, j))
-        if len(maze_data[i]) < max_line_length:
+        if len(maze_data[i]) < max_line_length:  # Будем считать, что в отсутствующих клетках стоят стены
             for k in range(len(maze_data[i]), max_line_length):
                 walls.append((i, k))
 
     if not start_found:
-        if is_logged:
-            print('У лабиринта отсутствует старт! Добавьте его в файл с помощью символа "S".')
-        sys.exit(1)
+        raise Exception('У лабиринта отсутствует старт! Добавьте его в файл с помощью символа "S".')
     if not finish_found:
-        if is_logged:
-            print('У лабиринта отсутствует финиш! Добавьте его в файл с помощью символа "F".')
-        sys.exit(1)
+        raise Exception('У лабиринта отсутствует финиш! Добавьте его в файл с помощью символа "F".')
 
     return Grid(len(maze_data), max_line_length, start, finish, walls)
 
 
-def search_path(graph, is_logged = True):
+def calc_heuristic_dist(a, b):
+    (x1, y1) = a
+    (x2, y2) = b
+    return abs(x1 - x2) + abs(y1 - y2)
+
+
+def restore_path(previous_nodes, start, finish):
+    if not (finish in previous_nodes):
+        raise Exception('Хомяку не удалось найти путь в лабиринте :(')
+    else:
+        current = previous_nodes[finish]
+        path = []
+        while current != start:
+            path.append(current)
+            current = previous_nodes[current]
+        return path
+
+
+def search_path(graph):
     queue = PriorityQueue()
     queue.put(graph.start, 0)
     previous_nodes = {graph.start: None}
@@ -109,54 +125,42 @@ def search_path(graph, is_logged = True):
             new_cost = costs[current] + 1
             if next_node not in costs or new_cost < costs[next_node]:
                 costs[next_node] = new_cost
-                priority = new_cost + heuristic(graph.finish, next_node)
+                priority = new_cost + calc_heuristic_dist(graph.finish, next_node)
                 queue.put(next_node, priority)
                 previous_nodes[next_node] = current
 
-    return restore_path(previous_nodes, graph.start, graph.finish, is_logged)
+    return restore_path(previous_nodes, graph.start, graph.finish)
 
 
-def heuristic(a, b):
-    (x1, y1) = a
-    (x2, y2) = b
-    return abs(x1 - x2) + abs(y1 - y2)
-
-
-def restore_path(previous_nodes, start, finish, is_logged = True):
-    if not(finish in previous_nodes):
-        if is_logged:
-            print('Хомяку не удалось найти путь в лабиринте :(')
-        sys.exit(1)
-    else:
-        current = previous_nodes[finish]
-        path = []
-        while current != start:
-            path.append(current)
-            current = previous_nodes[current]
-        return path
-
-
-def draw_path(maze_name, path, is_logged = True):
+def draw_path(maze_lines, solved_maze_name, path, verbose=False):
     try:
-        with open(maze_name, 'r') as maze_file:
-            maze_lines = maze_file.readlines()
         for node in path:
             maze_lines[node[0]] = list(maze_lines[node[0]])
             maze_lines[node[0]][node[1] + 1] = '*'
             maze_lines[node[0]] = "".join(maze_lines[node[0]])
-        solved_maze_name = '{}_solved.txt'.format(splitext(maze_name)[0])
         with open(solved_maze_name, 'w') as solved_maze_file:
             solved_maze_file.writelines(maze_lines)
-        if is_logged:
+        if verbose:
             print('Хомяк нашёл путь в лабиринте и записал его в файл {}'.format(solved_maze_name))
     except IOError:
-        if is_logged:
-            print('Не удалось записать решение лабиринта в файл.')
-        sys.exit(1)
+        raise Exception('Не удалось записать решение лабиринта в файл.')
 
 
 if __name__ == '__main__':
-    maze_name = sys.argv[1] if len(sys.argv) > 1 else 'maze.txt'
-    maze = parse_maze(maze_name)
-    path = search_path(maze)
-    draw_path(maze_name, path)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-in_maze', type=str, default='maze.txt', help='Входной файл для лабиринта')
+    parser.add_argument('-out_maze', type=str, help='Выходной файл для решённого лабиринта')
+    parser.add_argument('-v', action="store_true", help='Включает подробный режим (программа пишет о успешном завершении или возникшей ошибке)')
+    args = parser.parse_args()
+
+    maze_name = args.in_maze
+    solved_maze_name = args.out_maze if args.out_maze else '{}_solved.txt'.format(splitext(maze_name)[0])
+
+    try:
+        lines, maze_data = read_maze(maze_name)
+        maze = parse_maze(maze_data)
+        path = search_path(maze)
+        draw_path(lines, solved_maze_name, path, args.v)
+    except Exception as ex:
+        print(ex)
+        sys.exit(1)
